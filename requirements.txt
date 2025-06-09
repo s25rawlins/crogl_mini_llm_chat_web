@@ -1,0 +1,24 @@
+# Core dependencies
+openai>=1.0.0
+psycopg2-binary>=2.9.0
+bcrypt>=4.0.0
+pyjwt>=2.8.0
+redis>=4.5.0
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+python-dotenv>=1.0.0
+
+# Web framework dependencies
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# OAuth dependencies
+authlib>=1.2.0
+requests>=2.31.0
+
+# Development dependencies (optional)
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
