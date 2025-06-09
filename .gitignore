@@ -396,3 +396,16 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Docker and containerization
+.env.test
+docker-compose.override.yml
+.docker/
+
+# Google Cloud SDK (should not be in project directory)
+exec -l /
+google-cloud-sdk/
+gcloud/
+
+# Temporary cleanup documentation
+CLEANUP_SUMMARY.md

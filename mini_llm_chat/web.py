@@ -155,8 +155,9 @@ def main():
     load_dotenv()
     
     # Get configuration from environment
-    host = os.getenv("WEB_HOST", "127.0.0.1")
-    port = int(os.getenv("WEB_PORT", "8000"))
+    # Cloud Run uses PORT environment variable
+    host = os.getenv("WEB_HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", os.getenv("WEB_PORT", "8000")))
     debug = os.getenv("DEBUG", "false").lower() == "true"
     
     # Validate required environment variables
