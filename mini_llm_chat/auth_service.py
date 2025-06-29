@@ -1,12 +1,4 @@
-"""
-Authentication Service Module
-
-This module provides comprehensive authentication services including:
-- OAuth integration (Google)
-- Email-based authentication
-- Password reset functionality
-- User registration and management
-"""
+"""Authentication service with OAuth, email auth, and password reset."""
 
 import logging
 import os
@@ -28,38 +20,26 @@ logger = logging.getLogger(__name__)
 
 
 class AuthenticationService:
-    """Comprehensive authentication service."""
+    """Authentication service with OAuth and email support."""
 
     def __init__(self):
         """Initialize authentication service."""
         self.backend = get_database_manager().get_backend()
         
-        # OAuth configuration
         self.google_client_id = os.getenv("GOOGLE_CLIENT_ID")
         self.google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
         
-        # Email configuration
         self.smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_username = os.getenv("SMTP_USERNAME")
         self.smtp_password = os.getenv("SMTP_PASSWORD")
         self.from_email = os.getenv("FROM_EMAIL", self.smtp_username)
         
-        # Application configuration
         self.app_name = os.getenv("APP_NAME", "Mini LLM Chat")
         self.app_url = os.getenv("APP_URL", "http://localhost:3000")
 
     def authenticate_with_email(self, email: str, password: str) -> Optional[User]:
-        """
-        Authenticate user with email and password.
-        
-        Args:
-            email: User's email address
-            password: User's password
-            
-        Returns:
-            User object if authentication successful, None otherwise
-        """
+        """Authenticate user with email and password."""
         try:
             session = self.backend._get_session()
             try:
@@ -77,7 +57,6 @@ class AuthenticationService:
                 if user and user.hashed_password and bcrypt.checkpw(
                     password.encode("utf-8"), user.hashed_password.encode("utf-8")
                 ):
-                    # Update last login
                     user.last_login = datetime.utcnow()
                     session.commit()
                     session.refresh(user)
@@ -96,18 +75,7 @@ class AuthenticationService:
         first_name: str, 
         last_name: str
     ) -> Tuple[Optional[User], str]:
-        """
-        Register a new user with email and password.
-        
-        Args:
-            email: User's email address
-            password: User's password
-            first_name: User's first name
-            last_name: User's last name
-            
-        Returns:
-            Tuple of (User object, error message). User is None if registration failed.
-        """
+        """Register new user with email and password."""
         try:
             session = self.backend._get_session()
             try:
@@ -166,21 +134,11 @@ class AuthenticationService:
             return None, f"Registration failed: {str(e)}"
 
     def authenticate_with_google(self, code: str, redirect_uri: str) -> Tuple[Optional[User], bool, str]:
-        """
-        Authenticate user with Google OAuth.
-        
-        Args:
-            code: OAuth authorization code
-            redirect_uri: OAuth redirect URI
-            
-        Returns:
-            Tuple of (User object, is_new_user, error_message)
-        """
+        """Authenticate user with Google OAuth."""
         try:
             if not self.google_client_id or not self.google_client_secret:
                 return None, False, "Google OAuth not configured"
             
-            # Exchange code for token
             token_url = "https://oauth2.googleapis.com/token"
             token_data = {
                 "client_id": self.google_client_id,
@@ -194,19 +152,16 @@ class AuthenticationService:
             token_response.raise_for_status()
             token_info = token_response.json()
             
-            # Get user info from Google
             user_info_url = "https://www.googleapis.com/oauth2/v2/userinfo"
             headers = {"Authorization": f"Bearer {token_info['access_token']}"}
             user_response = requests.get(user_info_url, headers=headers)
             user_response.raise_for_status()
             user_data = user_response.json()
             
-            # Find or create user
             session = self.backend._get_session()
             try:
                 from mini_llm_chat.backends.postgresql import SQLAlchemyUser
                 
-                # Check if user exists by email or OAuth ID
                 existing_user = (
                     session.query(SQLAlchemyUser)
                     .filter(
@@ -220,25 +175,21 @@ class AuthenticationService:
                 )
                 
                 if existing_user:
-                    # Update OAuth info if needed
                     if not existing_user.oauth_provider:
                         existing_user.oauth_provider = "google"
                         existing_user.oauth_id = user_data["id"]
                         existing_user.email_verified = True
                     
-                    # Update last login
                     existing_user.last_login = datetime.utcnow()
                     session.commit()
                     session.refresh(existing_user)
                     
                     return self.backend._convert_user(existing_user), False, ""
                 
-                # Create new user
                 username = user_data["email"].split('@')[0]
                 counter = 1
                 original_username = username
                 
-                # Ensure username is unique
                 while session.query(SQLAlchemyUser).filter(
                     SQLAlchemyUser.username == username
                 ).first():
@@ -255,7 +206,7 @@ class AuthenticationService:
                     oauth_provider="google",
                     oauth_id=user_data["id"],
                     email_verified=True,
-                    hashed_password=None  # No password for OAuth users
+                    hashed_password=None
                 )
                 
                 session.add(new_user)
@@ -273,15 +224,7 @@ class AuthenticationService:
             return None, False, f"OAuth authentication failed: {str(e)}"
 
     def initiate_password_reset(self, email: str) -> Tuple[bool, str]:
-        """
-        Initiate password reset process.
-        
-        Args:
-            email: User's email address
-            
-        Returns:
-            Tuple of (success, message)
-        """
+        """Initiate password reset process."""
         try:
             session = self.backend._get_session()
             try:
@@ -324,16 +267,7 @@ class AuthenticationService:
             return False, "Failed to initiate password reset. Please try again later."
 
     def reset_password(self, token: str, new_password: str) -> Tuple[bool, str]:
-        """
-        Reset user password with token.
-        
-        Args:
-            token: Password reset token
-            new_password: New password
-            
-        Returns:
-            Tuple of (success, message)
-        """
+        """Reset user password with token."""
         try:
             session = self.backend._get_session()
             try:
@@ -352,13 +286,11 @@ class AuthenticationService:
                 if not user:
                     return False, "Invalid or expired reset token."
                 
-                # Hash new password
                 salt = bcrypt.gensalt()
                 user.hashed_password = bcrypt.hashpw(
                     new_password.encode("utf-8"), salt
                 ).decode("utf-8")
                 
-                # Clear reset token
                 user.password_reset_token = None
                 user.password_reset_expires = None
                 
@@ -375,17 +307,7 @@ class AuthenticationService:
             return False, "Failed to reset password. Please try again."
 
     def _send_password_reset_email(self, email: str, token: str, first_name: str) -> bool:
-        """
-        Send password reset email.
-        
-        Args:
-            email: User's email address
-            token: Reset token
-            first_name: User's first name
-            
-        Returns:
-            True if email sent successfully, False otherwise
-        """
+        """Send password reset email."""
         try:
             if not all([self.smtp_username, self.smtp_password]):
                 logger.warning("SMTP credentials not configured")
@@ -393,13 +315,11 @@ class AuthenticationService:
             
             reset_url = f"{self.app_url}/reset-password?token={token}"
             
-            # Create email
             msg = MIMEMultipart()
             msg['From'] = self.from_email
             msg['To'] = email
             msg['Subject'] = f"Password Reset - {self.app_name}"
             
-            # Email body
             body = f"""
 Hello {first_name or 'there'},
 
@@ -418,7 +338,6 @@ The {self.app_name} Team
             
             msg.attach(MIMEText(body, 'plain'))
             
-            # Send email
             server = smtplib.SMTP(self.smtp_server, self.smtp_port)
             server.starttls()
             server.login(self.smtp_username, self.smtp_password)
@@ -433,15 +352,7 @@ The {self.app_name} Team
             return False
 
     def get_user_by_email(self, email: str) -> Optional[User]:
-        """
-        Get user by email address.
-        
-        Args:
-            email: User's email address
-            
-        Returns:
-            User object if found, None otherwise
-        """
+        """Get user by email address."""
         try:
             session = self.backend._get_session()
             try:
@@ -468,15 +379,7 @@ The {self.app_name} Team
             return None
 
     def get_google_oauth_url(self, redirect_uri: str) -> str:
-        """
-        Get Google OAuth authorization URL.
-        
-        Args:
-            redirect_uri: OAuth redirect URI
-            
-        Returns:
-            Authorization URL
-        """
+        """Get Google OAuth authorization URL."""
         if not self.google_client_id:
             raise ValueError("Google OAuth not configured")
         

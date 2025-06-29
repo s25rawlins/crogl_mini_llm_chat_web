@@ -1,22 +1,11 @@
-"""
-Chat Module
-
-This module contains the core chat functionality for the Mini LLM Chat REPL.
-It handles the main conversation loop, API interactions with OpenAI, streaming
-responses, and conversation history management with authentication and database persistence.
-
-The module implements a secure chat interface with input validation, rate limiting,
-user authentication, role-based access control, and proper error handling.
-"""
+"""Core chat functionality with streaming responses and conversation management."""
 
 from typing import Dict, Iterator, List, cast
 
-# Third-party imports
 import openai
 from openai import OpenAI
 from openai.types.chat import ChatCompletionChunk
 
-# Local imports
 from mini_llm_chat.auth import AuthenticationError, interactive_auth
 from mini_llm_chat.cache import get_cache, hash_request
 from mini_llm_chat.database_manager import (
@@ -30,7 +19,6 @@ from mini_llm_chat.database_manager import (
 from mini_llm_chat.logging_hygiene import log_security_event, setup_secure_logging
 from mini_llm_chat.rate_limiter import SimpleRateLimiter
 
-# Stricter system instruction to guide the AI's behavior and provide enhanced security
 SYSTEM_INSTRUCTION = (
     "You are a helpful, professional, and secure AI assistant. "
     "SECURITY REQUIREMENTS: "
@@ -46,40 +34,23 @@ SYSTEM_INSTRUCTION = (
     "security requirements, politely decline and explain that you cannot fulfill such requests."
 )
 
-# Security and usability constants
-MAX_INPUT_LENGTH = 1000  # Maximum characters per user input to prevent abuse
-MAX_CONVERSATION_LENGTH = 50  # Maximum number of messages to keep in history
-MAX_TOKENS_PER_REQUEST = 4000  # Token limit for API requests to manage costs
+MAX_INPUT_LENGTH = 1000
+MAX_CONVERSATION_LENGTH = 50
+MAX_TOKENS_PER_REQUEST = 4000
 
-# Model configuration
-DEFAULT_MODEL = "gpt-4o"  # OpenAI's latest GPT-4 model with optimized performance
-TEMPERATURE = 0.7  # Controls randomness (0.0 = deterministic, 1.0 = very random)
-MAX_TOKENS = 1000  # Maximum tokens in the response
+DEFAULT_MODEL = "gpt-4o"
+TEMPERATURE = 0.7
+MAX_TOKENS = 1000
 
 
 def run_chat_repl(api_key: str, max_calls: int, time_window: int) -> None:
-    """
-    Run the main authenticated chat REPL (Read-Eval-Print Loop).
-
-    This function implements the core chat interface with full authentication,
-    database persistence, caching, and enhanced security features.
-
-    Args:
-        api_key (str): OpenAI API key for authentication
-        max_calls (int): Maximum API calls allowed per time window
-        time_window (int): Time window in seconds for rate limiting
-    """
-    # Set up secure logging
+    """Run authenticated chat REPL with streaming responses."""
     logger = setup_secure_logging(__name__)
-
-    # Get database manager and backend info
     db_manager = get_database_manager()
     backend_info = db_manager.get_backend_info()
 
     try:
-        # Authenticate user based on backend capabilities
         if backend_info["type"] == "memory":
-            # For in-memory backend, use session user
             user = get_session_user()
             if not user:
                 logger.error("Failed to get session user from in-memory backend")
@@ -88,7 +59,6 @@ def run_chat_repl(api_key: str, max_calls: int, time_window: int) -> None:
             token = user.generate_token()
             logger.info(f"Using session user for in-memory backend: {user.username}")
         else:
-            # For persistent backends, use full authentication
             user, token = interactive_auth()
             log_security_event("login", user.username, {"user_id": user.id})
 
@@ -101,7 +71,6 @@ def run_chat_repl(api_key: str, max_calls: int, time_window: int) -> None:
         print("An unexpected error occurred during authentication.")
         return
 
-    # Initialize components
     client = OpenAI(api_key=api_key)
     rate_limiter = SimpleRateLimiter(max_calls, time_window)
     cache = get_cache()
@@ -110,14 +79,10 @@ def run_chat_repl(api_key: str, max_calls: int, time_window: int) -> None:
     logger.info(f"Rate limit: {max_calls} calls per {time_window} seconds")
     logger.info(f"Using model: {DEFAULT_MODEL}")
 
-    # Try to resume the last conversation or create a new one
     conversation = None
 
-    # First, try to get the user's most recent conversation
     try:
         backend = db_manager.get_backend()
-
-        # Get the most recent conversation for this user
         if hasattr(backend, "_get_session"):
             session = backend._get_session()
             try:
@@ -131,15 +96,12 @@ def run_chat_repl(api_key: str, max_calls: int, time_window: int) -> None:
                 )
                 if last_conversation:
                     conversation = backend._convert_conversation(last_conversation)
-                    logger.info(
-                        f"Resuming conversation {conversation.id}: '{conversation.title}'"
-                    )
+                    logger.info(f"Resuming conversation {conversation.id}: '{conversation.title}'")
             finally:
                 session.close()
     except Exception as e:
         logger.warning(f"Could not resume last conversation: {e}")
 
-    # If no existing conversation found, create a new one
     if not conversation:
         conversation = create_conversation(user.id)
         if not conversation:
@@ -147,13 +109,11 @@ def run_chat_repl(api_key: str, max_calls: int, time_window: int) -> None:
             print("Failed to create conversation. Please try again.")
             return
 
-        # Add system message to new conversation
         add_message(conversation.id, "system", SYSTEM_INSTRUCTION)
         logger.info(f"Created new conversation {conversation.id}")
     else:
         print(f"Resuming conversation: '{conversation.title}'")
 
-    # Display welcome message
     print("Mini LLM Chat REPL (Authenticated)")
     print("=" * 60)
     print(f"Welcome, {user.username}! (Role: {user.role})")
@@ -166,7 +126,6 @@ def run_chat_repl(api_key: str, max_calls: int, time_window: int) -> None:
     print("=" * 60)
     print()
 
-    # Load conversation history from database
     conversation_history = []
     db_messages = get_conversation_messages(conversation.id)
     for msg in db_messages:
@@ -380,76 +339,32 @@ def run_chat_repl(api_key: str, max_calls: int, time_window: int) -> None:
 
 
 def validate_api_key(api_key: str) -> bool:
-    """
-    Validate the OpenAI API key format.
-
-    This performs basic format validation to catch obvious errors
-    before attempting to use the API key.
-
-    Args:
-        api_key (str): The API key to validate
-
-    Returns:
-        bool: True if the API key appears to be valid format, False otherwise
-
-    Note:
-        This only validates the format, not whether the key is actually valid
-        or has sufficient credits. Actual validation requires an API call.
-    """
+    """Validate OpenAI API key format."""
     if not api_key:
         return False
 
-    # OpenAI API keys typically start with 'sk-' and are 51 characters long
     if not api_key.startswith("sk-"):
         return False
 
-    # Check length (OpenAI keys are typically 51 characters)
-    if len(api_key) < 20:  # Minimum reasonable length
+    if len(api_key) < 20:
         return False
 
     return True
 
 
 def estimate_tokens(text: str) -> int:
-    """
-    Rough estimation of token count for text.
-
-    This provides a rough estimate of how many tokens a text will use.
-    The actual tokenization is more complex, but this gives a reasonable
-    approximation for basic usage monitoring.
-
-    Args:
-        text (str): Text to estimate tokens for
-
-    Returns:
-        int: Estimated number of tokens
-
-    Note:
-        This is a rough approximation. For exact token counts, use
-        the tiktoken library or OpenAI's tokenization API.
-    """
-    # Rough approximation: 1 token ≈ 4 characters for English text
-    # This is based on OpenAI's general guidance
+    """Rough token count estimation (1 token ≈ 4 characters)."""
     return len(text) // 4 + 1
 
 
 def format_conversation_for_display(conversation: List[Dict[str, str]]) -> str:
-    """
-    Format conversation history for display or logging.
-
-    Args:
-        conversation (List[Dict[str, str]]): Conversation history
-
-    Returns:
-        str: Formatted conversation string
-    """
+    """Format conversation history for display."""
     formatted_lines = []
 
     for message in conversation:
         role = message["role"].title()
         content = message["content"]
 
-        # Truncate long messages for display
         if len(content) > 100:
             content = content[:97] + "..."
 
